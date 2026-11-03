@@ -217,6 +217,12 @@ pub struct DesignApp {
     /// being cataloged: the fonts are installed again when they are).
     fonts_system: bool,
     pub restyle: bool,
+    /// The shared suite palette, when a file was found at startup (native only).
+    #[cfg(not(target_arch = "wasm32"))]
+    palette: Option<craft_ui::theme::Palette>,
+    /// Watches the palette file for changes while the viewport is visible.
+    #[cfg(not(target_arch = "wasm32"))]
+    palette_watcher: craft_ui::theme::PaletteWatcher,
     fonts_ready: bool,
     /// Files the operating system asked to open (macOS Finder, Dock, Open With), opened once the
     /// window is ready; see [`DesignApp::open_documents_later`].

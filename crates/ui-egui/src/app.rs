@@ -94,6 +94,10 @@ impl DesignApp {
             fonts_lang: String::new(),
             fonts_system: false,
             restyle: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            palette: craft_ui::theme::Palette::load().map(|loaded| loaded.palette),
+            #[cfg(not(target_arch = "wasm32"))]
+            palette_watcher: craft_ui::theme::PaletteWatcher::from_env(),
             fonts_ready: false,
             os_documents: Vec::new(),
             integrated_titlebar: false,
