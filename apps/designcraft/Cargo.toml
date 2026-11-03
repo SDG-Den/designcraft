@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 designcraft-engine = { workspace = true }
 designcraft-ui-egui = { workspace = true }
+# The read-only settings overlay (settings.override.json), shared with the CLI.
+craft-settings = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
 serde = { workspace = true }
