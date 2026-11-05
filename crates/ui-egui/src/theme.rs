@@ -42,7 +42,7 @@ impl Brightness {
 }
 
 /// Every colour the UI uses. Widgets never hard-code colours.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
     pub dark: bool,
     pub app_bar: Color32,
@@ -268,6 +268,56 @@ impl Tokens {
             },
         }
     }
+
+    /// Tokens for a shared suite palette. The palette's family decides dark or light; `brightness`
+    /// keeps High Contrast, which the palette never tints, and the saved brightness for no palette.
+    pub fn for_palette(brightness: Brightness, palette: &craft_ui::theme::Palette) -> Self {
+        if brightness == Brightness::HighContrast {
+            return Self::for_brightness(Brightness::HighContrast);
+        }
+        let dark = palette.is_dark();
+        let mut t = Self::for_brightness(if dark { Brightness::Dark } else { Brightness::Light });
+        let (background, surface, surface_alt) = (palette.background(), palette.surface(), palette.surface_alt());
+        let outline = palette.outline();
+        let accent = palette.accent();
+        t.dark = dark;
+        t.app_bar = background;
+        t.panel = surface;
+        t.panel_darker = background;
+        t.input = blend(background, if dark { Color32::BLACK } else { Color32::WHITE }, 0.25);
+        t.input_border = outline;
+        t.divider = outline;
+        t.text = palette.text();
+        t.text_strong = palette.base[7];
+        t.text_dim = palette.text_muted();
+        t.text_disabled = blend(palette.text_muted(), background, 0.5);
+        t.icon = palette.text_muted();
+        t.hover = surface_alt;
+        t.tool_active = blend(background, outline, 0.25);
+        t.accent = accent;
+        t.accent_strong = blend(accent, if dark { background } else { palette.base[7] }, 0.2);
+        t.row_selected = blend(accent, background, if dark { 0.55 } else { 0.75 });
+        t.button = surface_alt;
+        t.border = outline;
+        t.field_border = blend(outline, palette.text_muted(), 0.5);
+        t.well = t.tool_active;
+        t.tab_strip = background;
+        t
+    }
+
+    /// The built-in tokens when no palette is loaded.
+    pub fn for_palette_or_builtin(brightness: Brightness, palette: Option<&craft_ui::theme::Palette>) -> Self {
+        match palette {
+            Some(palette) => Self::for_palette(brightness, palette),
+            None => Self::for_brightness(brightness),
+        }
+    }
+}
+
+/// `from` moved `amount` of the way to `to`, per RGB channel.
+fn blend(from: Color32, to: Color32, amount: f32) -> Color32 {
+    let channel = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(channel(from.r(), to.r()), channel(from.g(), to.g()), channel(from.b(), to.b()))
 }
 
 /// Install the UI fonts for the interface language `lang` (it orders the CJK fallbacks).
@@ -893,5 +943,121 @@ mod readout_tests {
         let hc = Tokens::for_brightness(Brightness::HighContrast);
         assert_eq!(hc.readout_bg, egui::Color32::BLACK);
         assert!(contrast(hc.readout_text, hc.readout_bg) >= 4.5);
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::{Brightness, Tokens};
+    use craft_ui::theme::Palette;
+    use egui::Color32;
+
+    fn palette(dark: bool, accent: Option<Color32>) -> Palette {
+        let mut palette = if dark { Palette::dark() } else { Palette::light() };
+        palette.accent = accent;
+        palette
+    }
+
+    fn luminance(c: Color32) -> f32 {
+        let linear = |v: u8| {
+            let v = f32::from(v) / 255.0;
+            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn dark_palette_maps_the_core_chrome() {
+        let palette = palette(true, Some(Color32::from_rgb(0xe2, 0xc4, 0x4a)));
+        let tokens = Tokens::for_palette(Brightness::MediumDark, &palette);
+        assert!(tokens.dark);
+        assert_eq!(tokens.app_bar, palette.background());
+        assert_eq!(tokens.panel, palette.surface());
+        assert_eq!(tokens.panel_darker, palette.background());
+        assert_eq!(tokens.divider, palette.outline());
+        assert_eq!(tokens.text, palette.text());
+        assert_eq!(tokens.text_dim, palette.text_muted());
+        assert_eq!(tokens.accent, palette.accent());
+        assert_eq!(tokens.row_selected, super::blend(palette.accent(), palette.background(), 0.55));
+        assert_eq!(tokens.tab_strip, palette.background());
+    }
+
+    #[test]
+    fn light_palette_maps_the_core_chrome() {
+        let palette = palette(false, Some(Color32::from_rgb(0x0a, 0x62, 0xd0)));
+        let tokens = Tokens::for_palette(Brightness::MediumLight, &palette);
+        assert!(!tokens.dark);
+        assert_eq!(tokens.app_bar, palette.background());
+        assert_eq!(tokens.panel, palette.surface());
+        assert_eq!(tokens.text, palette.text());
+        assert_eq!(tokens.text_strong, Color32::BLACK);
+        assert_eq!(tokens.accent, palette.accent());
+        assert_eq!(tokens.row_selected, super::blend(palette.accent(), palette.background(), 0.75));
+        assert_eq!(tokens.border, palette.outline());
+    }
+
+    #[test]
+    fn the_palette_family_overrides_the_saved_brightness() {
+        let dark = palette(true, None);
+        let light = palette(false, None);
+        let dark_from_light_saved = Tokens::for_palette(Brightness::Light, &dark);
+        assert!(dark_from_light_saved.dark);
+        assert_eq!(dark_from_light_saved.panel, dark.surface());
+
+        let light_from_dark_saved = Tokens::for_palette(Brightness::Dark, &light);
+        assert!(!light_from_dark_saved.dark);
+        assert_eq!(light_from_dark_saved.panel, light.surface());
+    }
+
+    #[test]
+    fn no_palette_keeps_the_built_in_tokens() {
+        for brightness in Brightness::ALL {
+            let built_in = Tokens::for_brightness(brightness);
+            assert_eq!(Tokens::for_palette_or_builtin(brightness, None), built_in, "{brightness:?}");
+        }
+    }
+
+    #[test]
+    fn a_palette_leaves_document_and_ruler_colours_alone() {
+        for (brightness, palette) in [(Brightness::Dark, palette(true, None)), (Brightness::Light, palette(false, None))] {
+            let built_in = Tokens::for_brightness(brightness);
+            let tokens = Tokens::for_palette(brightness, &palette);
+            for (mapped, original) in [
+                (tokens.pasteboard, built_in.pasteboard),
+                (tokens.ruler, built_in.ruler),
+                (tokens.ruler_tick, built_in.ruler_tick),
+                (tokens.ruler_text, built_in.ruler_text),
+                (tokens.smart_guide, built_in.smart_guide),
+                (tokens.measure_bg, built_in.measure_bg),
+                (tokens.measure_text, built_in.measure_text),
+                (tokens.readout_bg, built_in.readout_bg),
+                (tokens.readout_text, built_in.readout_text),
+                (tokens.live_corner, built_in.live_corner),
+            ] {
+                assert_eq!(mapped, original, "{brightness:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_accent_keeps_readable_text() {
+        let palette = palette(true, Some(Color32::from_rgb(0xe2, 0xc4, 0x4a)));
+        let tokens = Tokens::for_palette(Brightness::Dark, &palette);
+        assert!(contrast(palette.contrast_text(), tokens.accent) >= 4.5);
+    }
+
+    #[test]
+    fn high_contrast_ignores_the_palette() {
+        for palette in [palette(true, Some(Color32::RED)), palette(false, Some(Color32::RED))] {
+            let tokens = Tokens::for_palette(Brightness::HighContrast, &palette);
+            assert_eq!(tokens, Tokens::for_brightness(Brightness::HighContrast));
+            assert_eq!(tokens.accent, Color32::from_rgb(0xff, 0xeb, 0x3b));
+            assert_eq!(tokens.accent_strong, Color32::from_rgb(0xff, 0xd6, 0x00));
+        }
     }
 }

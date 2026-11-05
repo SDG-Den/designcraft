@@ -73,9 +73,31 @@ impl DesignApp {
             // The font scan runs in the background: look again shortly.
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_palette(ctx);
         if self.restyle {
-            theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
+            #[cfg(not(target_arch = "wasm32"))]
+            let tokens = theme::Tokens::for_palette_or_builtin(self.ui.brightness, self.palette.as_ref());
+            #[cfg(target_arch = "wasm32")]
+            let tokens = theme::Tokens::for_brightness(self.ui.brightness);
+            theme::apply(ctx, &tokens);
             self.restyle = false;
+        }
+    }
+
+    /// Reload the suite palette when its file changes, only while the viewport is visible so a
+    /// hidden window does not wake for the watcher's poll interval.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_palette(&mut self, ctx: &egui::Context) {
+        let visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
+        if !visible {
+            return;
+        }
+        if let Some(loaded) = self.palette_watcher.poll(ctx)
+            && self.palette.as_ref() != Some(&loaded.palette)
+        {
+            self.palette = Some(loaded.palette);
+            self.restyle = true;
         }
     }
 
