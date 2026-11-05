@@ -1,0 +1,8 @@
+{
+  "url": "https://github.com/SDG-Den/designcraft/releases/download/binary-testing/designcraft-0.16.0-linux-x86_64.tar.gz",
+  "hash": "sha256-Hu/86uMHXmNIHOAhZ+N0yAmduY0fYgbC8DPbwlsE3oM=",
+  "version": "0.16.0",
+  "tag": "binary-testing",
+  "system": "x86_64-linux",
+  "repo": "SDG-Den/designcraft"
+}
