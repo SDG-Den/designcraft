@@ -16,6 +16,10 @@
   # The package of this flake; `flake.nix` passes it through `_module.args`, so importing the
   # module directly needs no overlay.
   designcraftPackage ? pkgs.designcraft,
+  # `flake.nix` passes the source build and the pre-built release binary separately. Importing the
+  # module directly falls back to `designcraftPackage` and no binary.
+  designcraftSourcePackage ? designcraftPackage,
+  designcraftBinaryPackage ? null,
   ...
 }:
 
@@ -48,10 +52,24 @@ in
   options.programs.designcraft = {
     enable = mkEnableOption "DesignCraft";
 
+    useBinary = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Install the pre-built Linux binary from `binary-url.json` when this system has one,
+        instead of building from source. Falls back to the source build when the file is missing
+        or the system is unsupported.
+      '';
+    };
+
     package = mkOption {
       type = types.package;
-      default = designcraftPackage;
-      defaultText = lib.literalMD "the `designcraft` package of this flake";
+      default =
+        if cfg.useBinary && designcraftBinaryPackage != null then
+          designcraftBinaryPackage
+        else
+          designcraftSourcePackage;
+      defaultText = lib.literalMD "the pre-built binary from `binary-url.json`, or the source build";
       description = "The DesignCraft package to install.";
     };
 
