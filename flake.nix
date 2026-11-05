@@ -14,6 +14,12 @@
       url = "github:storytold/craft-fonts/b076417b5880bd4154bd22f00695b1d28c6bea83";
       flake = false;
     };
+
+    # Splits the dependency build from the app build, so a source change does not recompile the
+    # whole dependency graph.
+    crane = {
+      url = "github:ipetkov/crane";
+    };
   };
 
   outputs =
@@ -21,6 +27,7 @@
       self,
       nixpkgs,
       craft-fonts,
+      crane,
     }:
     let
       inherit (nixpkgs) lib;
@@ -46,23 +53,41 @@
         inherit craft-fonts buildDate;
       };
 
+      # Written by `.github/workflows/binary.yml`; absent until the first binary release.
+      binaryInfo =
+        if builtins.pathExists ./binary-url.json then
+          builtins.fromJSON (builtins.readFile ./binary-url.json)
+        else
+          null;
+
       forAllSystems = f: lib.genAttrs systems (system: f (import nixpkgs { inherit system; }) system);
     in
     {
       packages = forAllSystems (
-        pkgs: _:
+        pkgs: system:
         let
-          designcraft = pkgs.callPackage ./nix/package.nix packageArgs;
+          source = pkgs.callPackage ./nix/package.nix (packageArgs // { craneLib = crane.mkLib pkgs; });
+          binary = pkgs.callPackage ./nix/binary.nix {
+            name = "designcraft";
+            info = binaryInfo;
+          };
+          binaryAvailable = binaryInfo != null && binaryInfo.system == system;
         in
         {
-          inherit designcraft;
-          default = designcraft;
+          designcraft-source = source;
+          designcraft = if binaryAvailable then binary else source;
+          default = if binaryAvailable then binary else source;
+        }
+        // lib.optionalAttrs binaryAvailable {
+          designcraft-binary = binary;
         }
       );
 
       # `nixpkgs.overlays = [ inputs.designcraft.overlays.default ]` → `pkgs.designcraft` everywhere.
       overlays.default = final: _prev: {
-        designcraft = final.callPackage ./nix/package.nix packageArgs;
+        designcraft = final.callPackage ./nix/package.nix (
+          packageArgs // { craneLib = crane.mkLib final; }
+        );
       };
 
       apps = forAllSystems (
@@ -77,7 +102,7 @@
       devShells = forAllSystems (
         pkgs: system:
         let
-          designcraft = self.packages.${system}.designcraft;
+          designcraft = self.packages.${system}.designcraft-source;
         in
         {
           default = pkgs.mkShell (
@@ -104,13 +129,15 @@
       );
 
       checks = forAllSystems (
-        pkgs: system: {
-          designcraft = self.packages.${system}.designcraft;
+        pkgs: system:
+        let
+          designcraft = self.packages.${system}.designcraft-source;
+        in
+        {
+          designcraft = designcraft;
 
           # Both module entry points evaluate with `enable = true` (no full NixOS evaluation).
-          modules = pkgs.callPackage ./nix/module-check.nix {
-            designcraft = self.packages.${system}.designcraft;
-          };
+          modules = pkgs.callPackage ./nix/module-check.nix { inherit designcraft; };
 
           # `nix fmt` formats the flake; this keeps it formatted.
           formatting =
@@ -128,16 +155,28 @@
       # so `nixosModules.default`/`homeManagerModules.default` work without the overlay.
       nixosModules.default =
         { pkgs, ... }:
+        let
+          system = pkgs.stdenv.hostPlatform.system;
+        in
         {
           imports = [ (import ./nix/module.nix { kind = "nixos"; }) ];
-          _module.args.designcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.designcraft;
+          _module.args = {
+            designcraftSourcePackage = self.packages.${system}.designcraft-source;
+            designcraftBinaryPackage = self.packages.${system}.designcraft-binary or null;
+          };
         };
 
       homeManagerModules.default =
         { pkgs, ... }:
+        let
+          system = pkgs.stdenv.hostPlatform.system;
+        in
         {
           imports = [ (import ./nix/module.nix { kind = "home-manager"; }) ];
-          _module.args.designcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.designcraft;
+          _module.args = {
+            designcraftSourcePackage = self.packages.${system}.designcraft-source;
+            designcraftBinaryPackage = self.packages.${system}.designcraft-binary or null;
+          };
         };
     };
 }
