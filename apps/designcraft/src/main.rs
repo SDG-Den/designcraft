@@ -194,12 +194,20 @@ fn load_prefs(app: &mut DesignApp) {
         }
         app.sync_keymap();
     }
-    // Engine preferences (Preferences dialog, favourites…) live beside the UI state.
+    // Engine preferences (Preferences dialog, favourites…) live beside the UI state. A package
+    // manager's `settings.override.json` is merged over the saved values, then deserialized.
     if let Some(p) = prefs_path().map(|p| p.with_file_name("prefs.json"))
         && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(prefs) = serde_json::from_slice::<designcraft_engine::Prefs>(&bytes)
+        && let Ok(mut prefs) = serde_json::from_slice::<serde_json::Value>(&bytes)
     {
-        app.session.prefs = prefs;
+        if let Some(dir) = p.parent()
+            && let Some(overlay) = craft_settings::overlay::load_overlay(dir)
+        {
+            craft_settings::overlay::merge(&mut prefs, overlay);
+        }
+        if let Ok(prefs) = serde_json::from_value::<designcraft_engine::Prefs>(prefs) {
+            app.session.prefs = prefs;
+        }
     }
 }
 

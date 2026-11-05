@@ -11,7 +11,7 @@
     # scripts have no glyphs. Pinned to the revision the release workflow uses — bump deliberately
     # (`nix flake update craft-fonts`).
     craft-fonts = {
-      url = "github:storytold/craft-fonts/abb83316d96aa59c1cf64784289e378fe9fa5695";
+      url = "github:storytold/craft-fonts/b076417b5880bd4154bd22f00695b1d28c6bea83";
       flake = false;
     };
   };
@@ -107,6 +107,11 @@
         pkgs: system: {
           designcraft = self.packages.${system}.designcraft;
 
+          # Both module entry points evaluate with `enable = true` (no full NixOS evaluation).
+          modules = pkgs.callPackage ./nix/module-check.nix {
+            designcraft = self.packages.${system}.designcraft;
+          };
+
           # `nix fmt` formats the flake; this keeps it formatted.
           formatting =
             pkgs.runCommand "designcraft-nix-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
@@ -118,5 +123,21 @@
       );
 
       formatter = forAllSystems (pkgs: _: pkgs.nixfmt);
+
+      # Both modules take the package from this flake unless `programs.designcraft.package` is set,
+      # so `nixosModules.default`/`homeManagerModules.default` work without the overlay.
+      nixosModules.default =
+        { pkgs, ... }:
+        {
+          imports = [ (import ./nix/module.nix { kind = "nixos"; }) ];
+          _module.args.designcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.designcraft;
+        };
+
+      homeManagerModules.default =
+        { pkgs, ... }:
+        {
+          imports = [ (import ./nix/module.nix { kind = "home-manager"; }) ];
+          _module.args.designcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.designcraft;
+        };
     };
 }
